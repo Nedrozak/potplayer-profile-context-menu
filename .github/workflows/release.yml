@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Verify tag matches VERSION
         shell: powershell
@@ -89,10 +89,17 @@ jobs:
           $zip = "dist/PotPlayer-Profile-Context-Menu-v$version.zip"
           $sums = 'dist/SHA256SUMS.txt'
           $title = "PotPlayer Profile Context Menu v$version"
+          $repo = $env:GITHUB_REPOSITORY
 
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $zip $sums --clobber
+          cmd /c "gh release view $tag --repo $repo >nul 2>nul"
+          $releaseExists = ($LASTEXITCODE -eq 0)
+
+          if ($releaseExists) {
+            gh release upload $tag $zip $sums --clobber --repo $repo
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            gh release edit $tag --title $title --repo $repo
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            gh release create $tag $zip $sums --title $title --generate-notes
+            gh release create $tag $zip $sums --verify-tag --title $title --generate-notes --repo $repo
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
