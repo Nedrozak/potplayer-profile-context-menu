@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build or update (for example: v1.0)'
+        required: true
+        default: 'v1.0'
 
 permissions:
   contents: write
@@ -13,16 +19,36 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Resolve release tag
+        shell: powershell
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $tag = '${{ inputs.tag }}'
+          } else {
+            $tag = $env:GITHUB_REF_NAME
+          }
+          if ([string]::IsNullOrWhiteSpace($tag)) { throw 'Release tag is empty.' }
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Checkout tag
+        if: github.event_name == 'push'
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Checkout selected tag
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Verify tag matches VERSION
         shell: powershell
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
           $expectedTag = "v$version"
-          if ($env:GITHUB_REF_NAME -cne $expectedTag) {
-            throw "Release tag must be '$expectedTag' for VERSION '$version'. Found '$env:GITHUB_REF_NAME'."
+          if ($env:RELEASE_TAG -cne $expectedTag) {
+            throw "Release tag must be '$expectedTag' for VERSION '$version'. Found '$env:RELEASE_TAG'."
           }
 
       - name: Validate PowerShell syntax
@@ -79,16 +105,68 @@ jobs:
             throw "Release archive contains unexpected files. Found: $($actualNames -join ', ')"
           }
 
-      - name: Create GitHub Release
+      - name: Build release notes
+        shell: powershell
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $lines = @(Get-Content CHANGELOG.md)
+          $escapedVersion = [regex]::Escape($version)
+          $start = -1
+
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match "^##\s+$escapedVersion(?:\s|$)") {
+              $start = $i
+              break
+            }
+          }
+          if ($start -lt 0) {
+            throw "CHANGELOG.md has no section for version $version."
+          }
+
+          $end = $lines.Count
+          for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^##\s+') {
+              $end = $i
+              break
+            }
+          }
+
+          if ($end -le ($start + 1)) {
+            throw "CHANGELOG.md section for version $version is empty."
+          }
+          $section = @($lines[($start + 1)..($end - 1)])
+          while ($section.Count -gt 0 -and [string]::IsNullOrWhiteSpace($section[0])) {
+            $section = @($section | Select-Object -Skip 1)
+          }
+          while ($section.Count -gt 0 -and [string]::IsNullOrWhiteSpace($section[-1])) {
+            $section = @($section | Select-Object -First ($section.Count - 1))
+          }
+          if ($section.Count -eq 0) {
+            throw "CHANGELOG.md section for version $version is empty."
+          }
+
+          $notes = @($section)
+          $notes += ''
+          $notes += '### Download'
+          $notes += ''
+          $notes += "Download ``PotPlayer-Profile-Context-Menu-v$version.zip`` below."
+          $notes += 'Use `SHA256SUMS.txt` to verify the download if desired.'
+
+          $notesPath = 'dist/RELEASE_NOTES.md'
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding UTF8
+          Write-Host "Release notes prepared from CHANGELOG.md for v$version."
+
+      - name: Create or update GitHub Release
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
-          $tag = $env:GITHUB_REF_NAME
+          $tag = $env:RELEASE_TAG
           $zip = "dist/PotPlayer-Profile-Context-Menu-v$version.zip"
           $sums = 'dist/SHA256SUMS.txt'
-          $title = "PotPlayer Profile Context Menu v$version"
+          $notes = 'dist/RELEASE_NOTES.md'
+          $title = $tag
           $repo = $env:GITHUB_REPOSITORY
 
           cmd /c "gh release view $tag --repo $repo >nul 2>nul"
@@ -97,9 +175,9 @@ jobs:
           if ($releaseExists) {
             gh release upload $tag $zip $sums --clobber --repo $repo
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            gh release edit $tag --title $title --repo $repo
+            gh release edit $tag --title $title --notes-file $notes --repo $repo
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            gh release create $tag $zip $sums --verify-tag --title $title --generate-notes --repo $repo
+            gh release create $tag $zip $sums --verify-tag --title $title --notes-file $notes --repo $repo
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
