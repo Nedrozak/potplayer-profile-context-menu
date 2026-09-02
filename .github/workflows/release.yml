@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches VERSION
+        shell: powershell
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $expectedTag = "v$version"
+          if ($env:GITHUB_REF_NAME -cne $expectedTag) {
+            throw "Release tag must be '$expectedTag' for VERSION '$version'. Found '$env:GITHUB_REF_NAME'."
+          }
+
+      - name: Validate PowerShell syntax
+        shell: powershell
+        run: |
+          foreach ($file in @(
+            'app/PotPlayer_Profiles_Setup.ps1',
+            'app/PotPlayer_Profiles_Remove.ps1',
+            'scripts/Build-Release.ps1'
+          )) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
+              exit 1
+            }
+          }
+
+      - name: Build release package
+        shell: powershell
+        run: ./scripts/Build-Release.ps1
+
+      - name: Verify release archive
+        shell: powershell
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $package = "PotPlayer-Profile-Context-Menu-v$version"
+          $zip = "dist/$package.zip"
+          $test = 'dist/_verify'
+          if (Test-Path $test) { Remove-Item $test -Recurse -Force }
+          Expand-Archive -LiteralPath $zip -DestinationPath $test
+
+          $expectedNames = @(
+            '1.Setup_PotPlayer_Profiles.cmd',
+            '2.Remove_PotPlayer_Profiles.cmd',
+            'PotPlayer_Profiles_Setup.ps1',
+            'PotPlayer_Profiles_Remove.ps1',
+            'README.txt',
+            'LICENSE'
+          )
+          foreach ($name in $expectedNames) {
+            $file = "$test/$package/$name"
+            if (-not (Test-Path -LiteralPath $file)) { throw "Release archive missing: $file" }
+          }
+
+          $actualNames = @(Get-ChildItem -LiteralPath "$test/$package" -File | Select-Object -ExpandProperty Name | Sort-Object)
+          $expectedSorted = @($expectedNames | Sort-Object)
+          if (($actualNames -join "`n") -cne ($expectedSorted -join "`n")) {
+            throw "Release archive contains unexpected files. Found: $($actualNames -join ', ')"
+          }
+
+      - name: Create GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $tag = $env:GITHUB_REF_NAME
+          $zip = "dist/PotPlayer-Profile-Context-Menu-v$version.zip"
+          $sums = 'dist/SHA256SUMS.txt'
+          $title = "PotPlayer Profile Context Menu v$version"
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip $sums --clobber
+          } else {
+            gh release create $tag $zip $sums --title $title --generate-notes
+          }

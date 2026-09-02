@@ -1,0 +1,71 @@
+name: Bug report
+description: Report a reproducible problem with setup, synchronization, or removal.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Please review logs before uploading them: PowerShell transcripts can contain your Windows username, computer name, and local paths.
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: input
+    id: powershell
+    attributes:
+      label: PowerShell version
+      description: Run `$PSVersionTable.PSVersion`.
+      placeholder: 5.1.x
+    validations:
+      required: true
+  - type: input
+    id: potplayer
+    attributes:
+      label: PotPlayer version / installation type
+      placeholder: 64-bit installed version
+    validations:
+      required: true
+  - type: dropdown
+    id: settings
+    attributes:
+      label: PotPlayer settings storage
+      options:
+        - Registry
+        - INI
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include the exact error text and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run setup
+        2. Press Enter to sync
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste relevant Advanced → D output or attach a redacted diagnostic/log file.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I reviewed any attached logs/diagnostics for usernames, computer names, and private local paths.
+          required: true

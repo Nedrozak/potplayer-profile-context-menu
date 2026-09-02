@@ -1,0 +1,21 @@
+# Runtime output
+Logs/
+Backups/
+PotPlayer_Profile_Context_Menu.settings.json
+
+# Local release output
+dist/
+*.zip
+*.reg
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# PowerShell temporary files
+*.tmp
+*.bak

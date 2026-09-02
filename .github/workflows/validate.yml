@@ -1,0 +1,93 @@
+name: Validate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate PowerShell syntax
+        shell: powershell
+        run: |
+          $files = @(
+            'app/PotPlayer_Profiles_Setup.ps1',
+            'app/PotPlayer_Profiles_Remove.ps1',
+            'scripts/Build-Release.ps1'
+          )
+
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            )
+
+            if ($errors.Count -gt 0) {
+              Write-Host "Syntax errors in $file" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
+              exit 1
+            }
+          }
+
+      - name: Validate version 1.0
+        shell: powershell
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ($version -cne '1.0') { throw "VERSION must be 1.0, found '$version'." }
+
+          $setup = Get-Content app/PotPlayer_Profiles_Setup.ps1 -Raw
+          if ($setup -notmatch '\$AppVersion\s*=\s*''1\.0''') { throw 'Setup AppVersion is not 1.0.' }
+          if ($setup -notmatch '\$SchemaVersion\s*=\s*''1\.0''') { throw 'Setup SchemaVersion is not 1.0.' }
+
+          $remove = Get-Content app/PotPlayer_Profiles_Remove.ps1 -Raw
+          if ($remove -notmatch '\$AppVersion\s*=\s*''1\.0''') { throw 'Remove AppVersion is not 1.0.' }
+          if ($remove -notmatch '\$SchemaVersion\s*=\s*''1\.0''') { throw 'Remove SchemaVersion is not 1.0.' }
+
+      - name: Validate required repository files
+        shell: powershell
+        run: |
+          $required = @(
+            'app/1.Setup_PotPlayer_Profiles.cmd',
+            'app/2.Remove_PotPlayer_Profiles.cmd',
+            'app/PotPlayer_Profiles_Setup.ps1',
+            'app/PotPlayer_Profiles_Remove.ps1',
+            'README.md',
+            'README.txt',
+            'LICENSE',
+            'CHANGELOG.md',
+            'CONTRIBUTING.md',
+            'SECURITY.md',
+            'VERSION',
+            'scripts/Build-Release.ps1'
+          )
+          foreach ($file in $required) {
+            if (-not (Test-Path -LiteralPath $file)) { throw "Missing required file: $file" }
+          }
+
+      - name: Test release packaging
+        shell: powershell
+        run: |
+          ./scripts/Build-Release.ps1
+          $version = (Get-Content VERSION -Raw).Trim()
+          $package = "PotPlayer-Profile-Context-Menu-v$version"
+          $zip = "dist/$package.zip"
+          if (-not (Test-Path -LiteralPath $zip)) { throw 'Release ZIP was not created.' }
+          if (-not (Test-Path -LiteralPath 'dist/SHA256SUMS.txt')) { throw 'SHA256SUMS.txt was not created.' }
+
+          $test = 'dist/_verify'
+          if (Test-Path $test) { Remove-Item $test -Recurse -Force }
+          Expand-Archive -LiteralPath $zip -DestinationPath $test
+          if (-not (Test-Path -LiteralPath "$test/$package/1.Setup_PotPlayer_Profiles.cmd")) {
+            throw 'Release ZIP does not contain the expected top-level package folder.'
+          }
